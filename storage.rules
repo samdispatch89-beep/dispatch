@@ -1,0 +1,41 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function roleIs(expected) {
+      return signedIn() && request.auth.token.role == expected;
+    }
+
+    function isAdmin() {
+      return roleIs('admin');
+    }
+
+    function isAccountant() {
+      return roleIs('accountant');
+    }
+
+    function isPaperwork() {
+      return roleIs('paperwork');
+    }
+
+    function isDispatcher() {
+      return roleIs('dispatcher');
+    }
+
+    match /loads/{loadId}/{docType}/{fileName} {
+      allow read: if isAdmin() || isAccountant() || isPaperwork() || isDispatcher();
+      allow write: if isAdmin()
+        || isPaperwork()
+        || (isAccountant() && (docType == 'invoice_copy' || docType == 'payment_support_document'))
+        || (isDispatcher() && docType == 'other');
+    }
+
+    match /invoices/{year}/{fileName} {
+      allow read: if isAdmin() || isAccountant();
+      allow write: if isAdmin() || isAccountant();
+    }
+  }
+}

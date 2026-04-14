@@ -1,0 +1,13 @@
+{
+  "name": "dispatch-functions",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.1.1",
+    "firebase-functions": "^5.0.1",
+    "pdfkit": "^0.15.0"
+  }
+}

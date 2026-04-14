@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "125106578576",
+    "project_id": "dispatchmanagement-e11b7",
+    "storage_bucket": "dispatchmanagement-e11b7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:125106578576:android:e7facd0a7ae78d7e2f6415",
+        "android_client_info": {
+          "package_name": "com.example.dispatch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3H9gtQln-UGEhLpLcr0H0GjLDW64u1C4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
