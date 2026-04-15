@@ -21,7 +21,8 @@ class LoadItem {
   final double feePercentage;
   final double dispatchFeeAmount;
   final double dispatcherRevenue;
-  final String status;
+  final String operationalStatus;
+  final String financialStatus;
   final String invoiceStatus;
   final String paymentStatus;
   final String paperworkStatus;
@@ -29,8 +30,14 @@ class LoadItem {
   final String createdBy;
   final String createdDate;
   final String updatedDate;
+  final int year;
+  final int week;
+  final String yearWeek;
+  final String deliveryDateTime;
   final bool rateConfirmationUploaded;
   final bool podUploaded;
+  final String podUploadedAt;
+  final bool podDelayFlag;
   final bool bolUploaded;
   final int missingDocumentsCount;
 
@@ -57,7 +64,8 @@ class LoadItem {
     required this.feePercentage,
     required this.dispatchFeeAmount,
     required this.dispatcherRevenue,
-    required this.status,
+    required this.operationalStatus,
+    required this.financialStatus,
     required this.invoiceStatus,
     required this.paymentStatus,
     required this.paperworkStatus,
@@ -65,8 +73,14 @@ class LoadItem {
     required this.createdBy,
     required this.createdDate,
     required this.updatedDate,
+    required this.year,
+    required this.week,
+    required this.yearWeek,
+    required this.deliveryDateTime,
     required this.rateConfirmationUploaded,
     required this.podUploaded,
+    required this.podUploadedAt,
+    required this.podDelayFlag,
     required this.bolUploaded,
     required this.missingDocumentsCount,
   });
@@ -74,10 +88,12 @@ class LoadItem {
   bool get paperworkComplete =>
       rateConfirmationUploaded && podUploaded && bolUploaded;
 
+  String get status => operationalStatus;
+
   bool get invoiceReady =>
-      status == 'Delivered' &&
+      operationalStatus == 'Delivered' &&
       paperworkComplete &&
-      invoiceStatus == 'Pending';
+      financialStatus == 'Not Invoiced';
 
   factory LoadItem.fromMap(String id, Map<String, dynamic> map) {
     return LoadItem(
@@ -103,16 +119,23 @@ class LoadItem {
       feePercentage: (map['feePercentage'] ?? 0).toDouble(),
       dispatchFeeAmount: (map['dispatchFeeAmount'] ?? 0).toDouble(),
       dispatcherRevenue: (map['dispatcherRevenue'] ?? 0).toDouble(),
-      status: (map['status'] ?? 'Active').toString(),
-      invoiceStatus: (map['invoiceStatus'] ?? 'Pending').toString(),
+      operationalStatus: (map['operationalStatus'] ?? map['status'] ?? 'New').toString(),
+      financialStatus: (map['financialStatus'] ?? 'Not Invoiced').toString(),
+      invoiceStatus: (map['invoiceStatus'] ?? 'Not Invoiced').toString(),
       paymentStatus: (map['paymentStatus'] ?? 'Unpaid').toString(),
       paperworkStatus: (map['paperworkStatus'] ?? 'Incomplete').toString(),
       notes: (map['notes'] ?? '').toString(),
       createdBy: (map['createdBy'] ?? '').toString(),
       createdDate: (map['createdDate'] ?? '').toString(),
       updatedDate: (map['updatedDate'] ?? '').toString(),
+      year: (map['year'] ?? 0) as int,
+      week: (map['week'] ?? 0) as int,
+      yearWeek: (map['yearWeek'] ?? '').toString(),
+      deliveryDateTime: (map['deliveryDateTime'] ?? '').toString(),
       rateConfirmationUploaded: map['rateConfirmationUploaded'] == true,
       podUploaded: map['podUploaded'] == true,
+      podUploadedAt: (map['podUploadedAt'] ?? '').toString(),
+      podDelayFlag: map['podDelayFlag'] == true,
       bolUploaded: map['bolUploaded'] == true,
       missingDocumentsCount: (map['missingDocumentsCount'] ?? 3) as int,
     );
@@ -141,7 +164,9 @@ class LoadItem {
       'feePercentage': feePercentage,
       'dispatchFeeAmount': dispatchFeeAmount,
       'dispatcherRevenue': dispatcherRevenue,
-      'status': status,
+      'operationalStatus': operationalStatus,
+      'financialStatus': financialStatus,
+      'status': operationalStatus,
       'invoiceStatus': invoiceStatus,
       'paymentStatus': paymentStatus,
       'paperworkStatus': paperworkStatus,
@@ -149,8 +174,14 @@ class LoadItem {
       'createdBy': createdBy,
       'createdDate': createdDate,
       'updatedDate': updatedDate,
+      'year': year,
+      'week': week,
+      'yearWeek': yearWeek,
+      'deliveryDateTime': deliveryDateTime,
       'rateConfirmationUploaded': rateConfirmationUploaded,
       'podUploaded': podUploaded,
+      'podUploadedAt': podUploadedAt,
+      'podDelayFlag': podDelayFlag,
       'bolUploaded': bolUploaded,
       'missingDocumentsCount': missingDocumentsCount,
     };
@@ -178,7 +209,8 @@ class LoadItem {
     double? feePercentage,
     double? dispatchFeeAmount,
     double? dispatcherRevenue,
-    String? status,
+    String? operationalStatus,
+    String? financialStatus,
     String? invoiceStatus,
     String? paymentStatus,
     String? paperworkStatus,
@@ -186,8 +218,14 @@ class LoadItem {
     String? createdBy,
     String? createdDate,
     String? updatedDate,
+    int? year,
+    int? week,
+    String? yearWeek,
+    String? deliveryDateTime,
     bool? rateConfirmationUploaded,
     bool? podUploaded,
+    String? podUploadedAt,
+    bool? podDelayFlag,
     bool? bolUploaded,
     int? missingDocumentsCount,
   }) {
@@ -214,7 +252,8 @@ class LoadItem {
       feePercentage: feePercentage ?? this.feePercentage,
       dispatchFeeAmount: dispatchFeeAmount ?? this.dispatchFeeAmount,
       dispatcherRevenue: dispatcherRevenue ?? this.dispatcherRevenue,
-      status: status ?? this.status,
+      operationalStatus: operationalStatus ?? this.operationalStatus,
+      financialStatus: financialStatus ?? this.financialStatus,
       invoiceStatus: invoiceStatus ?? this.invoiceStatus,
       paymentStatus: paymentStatus ?? this.paymentStatus,
       paperworkStatus: paperworkStatus ?? this.paperworkStatus,
@@ -222,9 +261,15 @@ class LoadItem {
       createdBy: createdBy ?? this.createdBy,
       createdDate: createdDate ?? this.createdDate,
       updatedDate: updatedDate ?? this.updatedDate,
+      year: year ?? this.year,
+      week: week ?? this.week,
+      yearWeek: yearWeek ?? this.yearWeek,
+      deliveryDateTime: deliveryDateTime ?? this.deliveryDateTime,
       rateConfirmationUploaded:
           rateConfirmationUploaded ?? this.rateConfirmationUploaded,
       podUploaded: podUploaded ?? this.podUploaded,
+      podUploadedAt: podUploadedAt ?? this.podUploadedAt,
+      podDelayFlag: podDelayFlag ?? this.podDelayFlag,
       bolUploaded: bolUploaded ?? this.bolUploaded,
       missingDocumentsCount:
           missingDocumentsCount ?? this.missingDocumentsCount,

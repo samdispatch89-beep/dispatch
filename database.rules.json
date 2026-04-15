@@ -8,6 +8,10 @@
         ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || (auth.uid === $uid && !data.exists()))"
       }
     },
+    "companies": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
     "dispatchers": {
       ".read": "auth != null",
       ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
@@ -16,37 +20,41 @@
       ".read": "auth != null",
       ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'dispatcher')"
     },
-    "loads": {
-      "$loadId": {
-        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || data.child('dispatcherId').val() === root.child('users').child(auth.uid).child('dispatcherId').val())",
-        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || root.child('users').child(auth.uid).child('role').val() === 'accountant' || (!data.exists() && root.child('users').child(auth.uid).child('role').val() === 'dispatcher' && newData.child('dispatcherId').val() === root.child('users').child(auth.uid).child('dispatcherId').val()) || data.child('dispatcherId').val() === root.child('users').child(auth.uid).child('dispatcherId').val())"
-      }
-    },
-    "documents": {
-      "$documentId": {
-        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || root.child('loads').child(data.child('loadId').val()).child('dispatcherId').val() === root.child('users').child(auth.uid).child('dispatcherId').val())",
-        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || root.child('users').child(auth.uid).child('role').val() === 'accountant')"
-      }
-    },
-    "companies": {
-      ".read": "auth != null",
-      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
-    },
     "brokerages": {
       ".read": "auth != null",
       ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
     },
+    "loads": {
+      "$loadId": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || data.child('dispatcherId').val() === root.child('users').child(auth.uid).child('dispatcherId').val())",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || root.child('users').child(auth.uid).child('role').val() === 'accountant' || root.child('users').child(auth.uid).child('dispatcherId').val() === data.child('dispatcherId').val() || (!data.exists() && root.child('users').child(auth.uid).child('role').val() === 'dispatcher' && newData.child('dispatcherId').val() === root.child('users').child(auth.uid).child('dispatcherId').val()))"
+      }
+    },
+    "documents": {
+      "$documentId": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || root.child('users').child(auth.uid).child('dispatcherId').val() === data.child('dispatcherId').val())",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'paperwork' || root.child('users').child(auth.uid).child('role').val() === 'accountant')"
+      }
+    },
     "invoices": {
-      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant')",
-      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant')"
+      "$invoiceId": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'accountant')"
+      }
     },
-    "paperworkAlerts": {
-      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'paperwork')",
-      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    "activity_logs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     },
-    "adminSummaries": {
-      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
-      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    "notifications": {
+      "$notificationId": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || auth.uid === data.child('userId').val())",
+        ".write": "auth != null"
+      }
+    },
+    "weekly_summaries": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }

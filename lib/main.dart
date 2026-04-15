@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
 import 'models/app_user.dart';
@@ -11,12 +12,16 @@ import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/realtime_service.dart';
 import 'services/session_cache_service.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
     } else {
       Firebase.app();
     }
@@ -24,10 +29,20 @@ Future<void> main() async {
     if (error.code != 'duplicate-app') rethrow;
     Firebase.app();
   }
+
   unawaited(
     RealtimeService.instance.seedDefaultDataIfEmpty().catchError((_) {}),
   );
-  runApp(const DispatchApp());
+
+  final themeController = ThemeController();
+  await themeController.load();
+
+  runApp(
+    ChangeNotifierProvider.value(
+      value: themeController,
+      child: const DispatchApp(),
+    ),
+  );
 }
 
 class DispatchApp extends StatelessWidget {
@@ -35,98 +50,17 @@ class DispatchApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const baseBackground = Color(0xFF070B17);
-    const panel = Color(0xFF10182A);
-    const accent = Color(0xFF6C4DFF);
-
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: accent,
-      brightness: Brightness.dark,
-    ).copyWith(
-      surface: panel,
-      primary: accent,
-      secondary: const Color(0xFF19D3C5),
-    );
-
-    return MaterialApp(
-      title: 'Dispatch Management',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: colorScheme,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: baseBackground,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          centerTitle: false,
-        ),
-        cardTheme: CardThemeData(
-          color: panel,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: Color(0xFF1E2940)),
-          ),
-        ),
-        textTheme: ThemeData.dark().textTheme.apply(
-              bodyColor: Colors.white,
-              displayColor: Colors.white,
-            ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF0E1424),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFF24314B)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFF24314B)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: accent, width: 1.5),
-          ),
-          hintStyle: const TextStyle(color: Color(0xFF7F8CA8)),
-          labelStyle: const TextStyle(color: Color(0xFFA7B0C7)),
-        ),
-        snackBarTheme: SnackBarThemeData(
-          backgroundColor: const Color(0xFF11182A),
-          contentTextStyle: const TextStyle(color: Colors.white),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-        dialogTheme: DialogThemeData(
-          backgroundColor: panel,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        ),
-        drawerTheme: const DrawerThemeData(backgroundColor: Color(0xFF0B1120)),
-        dividerColor: const Color(0xFF1E2940),
-        iconTheme: const IconThemeData(color: Color(0xFFC7D2EA)),
-        chipTheme: ChipThemeData(
-          backgroundColor: const Color(0xFF151E33),
-          disabledColor: const Color(0xFF151E33),
-          selectedColor: accent.withValues(alpha: 0.18),
-          secondarySelectedColor: accent.withValues(alpha: 0.18),
-          side: const BorderSide(color: Color(0xFF27324D)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          labelStyle: const TextStyle(color: Colors.white),
-        ),
-        navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: const Color(0xFF0D1322),
-          indicatorColor: accent.withValues(alpha: 0.24),
-          labelTextStyle: WidgetStateProperty.all(
-            const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-        ),
-        bottomSheetTheme: const BottomSheetThemeData(
-          backgroundColor: Color(0xFF0F1728),
-          surfaceTintColor: Colors.transparent,
-        ),
-      ),
-      home: const AuthGate(),
+    return Consumer<ThemeController>(
+      builder: (context, themeController, _) {
+        return MaterialApp(
+          title: 'Dispatch Management',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light(),
+          darkTheme: AppTheme.dark(),
+          themeMode: themeController.themeMode,
+          home: const AuthGate(),
+        );
+      },
     );
   }
 }
@@ -157,12 +91,12 @@ class AuthGate extends StatelessWidget {
 
         return FutureBuilder<AppUser?>(
           future: _resolveProfile(firebaseUser.uid),
-          builder: (context, cachedSnapshot) {
-            if (cachedSnapshot.connectionState == ConnectionState.waiting) {
+          builder: (context, profileSnapshot) {
+            if (profileSnapshot.connectionState == ConnectionState.waiting) {
               return const _LoadingScreen(label: 'Loading your profile...');
             }
 
-            if (cachedSnapshot.hasError) {
+            if (profileSnapshot.hasError) {
               return _StartupIssueScreen(
                 title: 'Profile unavailable',
                 message:
@@ -175,7 +109,7 @@ class AuthGate extends StatelessWidget {
               );
             }
 
-            final appUser = cachedSnapshot.data;
+            final appUser = profileSnapshot.data;
             if (appUser == null) {
               return const AdminRegistration(bootstrapMode: true);
             }
@@ -235,20 +169,27 @@ class _StartupIssueScreen extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.cloud_off_outlined, size: 52, color: Color(0xFF8B6BFF)),
+                    const Icon(
+                      Icons.cloud_off_outlined,
+                      size: 52,
+                      color: Color(0xFF8B6BFF),
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       title,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Text(
                       message,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Color(0xFF9AA7C7), height: 1.5),
+                      style: const TextStyle(
+                        color: Color(0xFF9AA7C7),
+                        height: 1.5,
+                      ),
                     ),
                     const SizedBox(height: 18),
                     ElevatedButton(
@@ -307,7 +248,11 @@ class _InactiveAccountScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.lock_outline, size: 56, color: Color(0xFF5B7284)),
+              const Icon(
+                Icons.lock_outline,
+                size: 56,
+                color: Color(0xFF5B7284),
+              ),
               const SizedBox(height: 12),
               const Text(
                 'Your account is currently inactive.',

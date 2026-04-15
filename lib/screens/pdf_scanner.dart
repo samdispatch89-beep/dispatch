@@ -1,8 +1,7 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:path/path.dart' as p;
+import '../services/error_dialog_service.dart';
 import '../services/storage_service.dart';
 
 class PdfScanner extends StatefulWidget {
@@ -24,19 +23,36 @@ class _PdfScannerState extends State<PdfScanner> {
   }
 
   Future<void> _savePdf() async {
-    final pdf = pw.Document();
-    for (final pf in _pages) {
-      final bytes = pf.bytes!;
-      final image = pw.MemoryImage(bytes);
-      pdf.addPage(pw.Page(build: (c) => pw.Center(child: pw.Image(image))));
+    try {
+      final pdf = pw.Document();
+      for (final pf in _pages) {
+        final pageBytes = pf.bytes;
+        if (pageBytes == null) {
+          throw StateError('One of the selected images could not be read.');
+        }
+        final image = pw.MemoryImage(pageBytes);
+        pdf.addPage(pw.Page(build: (c) => pw.Center(child: pw.Image(image))));
+      }
+      final bytes = await pdf.save();
+      final filename = 'scan_${widget.loadId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final upload = await storage.uploadBytes(
+        bytes,
+        'scans/${widget.loadId}/$filename',
+        fileName: filename,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Uploaded: ${upload.downloadUrl}')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        await ErrorDialogService.show(
+          context,
+          message: 'Upload failed: $error',
+        );
+      }
     }
-    final bytes = await pdf.save();
-    final tmpDir = Directory.systemTemp;
-    final filename = 'scan_${widget.loadId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-    final tmp = File(p.join(tmpDir.path, filename));
-    await tmp.writeAsBytes(bytes);
-    final url = await storage.uploadFile(tmp, 'scans/${widget.loadId}/$filename');
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Uploaded: $url')));
   }
 
   @override

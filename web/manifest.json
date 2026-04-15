@@ -1,11 +1,11 @@
 {
-    "name": "dispatch",
-    "short_name": "dispatch",
+    "name": "Dispatch Flow",
+    "short_name": "Dispatch",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#070B17",
+    "theme_color": "#6C4DFF",
+    "description": "Dispatch Flow web portal for dispatch, accounting, paperwork, and admin management.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

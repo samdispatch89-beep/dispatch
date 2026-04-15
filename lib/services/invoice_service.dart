@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
-import 'package:path/path.dart' as path;
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/invoice_record.dart';
@@ -14,8 +12,8 @@ class InvoiceService {
   InvoiceService({
     RealtimeService? realtimeService,
     StorageService? storageService,
-  })  : _realtime = realtimeService ?? RealtimeService.instance,
-        _storage = storageService ?? StorageService();
+  }) : _realtime = realtimeService ?? RealtimeService.instance,
+       _storage = storageService ?? StorageService();
 
   final RealtimeService _realtime;
   final StorageService _storage;
@@ -31,7 +29,9 @@ class InvoiceService {
         build: (context) => [
           pw.Header(level: 0, child: pw.Text('Dispatch Invoice')),
           pw.Text('Invoice Number: $invoiceNumber'),
-          pw.Text('Invoice Date: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}'),
+          pw.Text(
+            'Invoice Date: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+          ),
           pw.Text('Due Date: $dueDate'),
           pw.SizedBox(height: 16),
           pw.Text('Company: ${load.companyName}'),
@@ -45,7 +45,10 @@ class InvoiceService {
             data: [
               ['Load Rate', load.loadRate.toStringAsFixed(2)],
               ['Dispatch Fee %', load.feePercentage.toStringAsFixed(2)],
-              ['Dispatch Fee Amount', load.dispatchFeeAmount.toStringAsFixed(2)],
+              [
+                'Dispatch Fee Amount',
+                load.dispatchFeeAmount.toStringAsFixed(2),
+              ],
               ['Invoice Amount', load.dispatcherRevenue.toStringAsFixed(2)],
             ],
           ),
@@ -58,7 +61,7 @@ class InvoiceService {
   }
 
   Future<InvoiceRecord> generateInvoice(LoadItem load) async {
-    if (load.status != 'Delivered') {
+    if (load.operationalStatus != 'Delivered') {
       throw StateError('A load cannot be invoiced unless it is Delivered.');
     }
     if (!load.paperworkComplete) {
@@ -70,34 +73,58 @@ class InvoiceService {
     final invoiceId = _realtime.invoicesRef.push().key!;
     final invoiceNumber = await _realtime.nextInvoiceNumber();
     final invoiceDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final dueDate = DateFormat('yyyy-MM-dd')
-        .format(DateTime.now().add(const Duration(days: 15)));
+    final dueDate = DateFormat(
+      'yyyy-MM-dd',
+    ).format(DateTime.now().add(const Duration(days: 15)));
     final pdfBytes = await buildInvoicePdf(
       load: load,
       invoiceNumber: invoiceNumber,
       dueDate: dueDate,
     );
 
-    final year = DateTime.now().year;
     final fileName = '$invoiceNumber.pdf';
-    final storagePath = 'invoices/$year/$fileName';
-    final tempFile = File(path.join(Directory.systemTemp.path, fileName));
-    await tempFile.writeAsBytes(pdfBytes);
-
-    final upload = await _storage.uploadFile(tempFile, storagePath);
+    final storagePath = _storage.buildInvoicePath(
+      companyName: load.companyName,
+      driverName: load.driverName,
+      yearWeek: load.yearWeek,
+      loadNumber: load.loadNumber,
+      fileName: fileName,
+    );
+    final upload = await _storage.uploadBytes(
+      pdfBytes,
+      storagePath,
+      fileName: fileName,
+    );
     final invoice = InvoiceRecord(
       id: invoiceId,
       invoiceNumber: invoiceNumber,
       loadId: load.id,
+      loadIds: [load.id],
+      companyId: load.companyId,
       companyName: load.companyName,
+      dispatcherId: load.dispatcherId,
+      driverId: load.driverId,
+      driversIncluded: [load.driverId],
+      year: load.year,
+      week: load.week,
+      yearWeek: load.yearWeek,
       invoiceDate: invoiceDate,
+      startDate: load.date,
+      endDate: load.deliveryDateTime.isEmpty
+          ? load.date
+          : load.deliveryDateTime,
+      totalLoads: 1,
+      totalGross: load.loadRate,
       feePercentage: load.feePercentage,
+      closingRate: load.feePercentage,
       dispatchFeeAmount: load.dispatchFeeAmount,
       invoiceAmount: load.dispatcherRevenue,
       dueDate: dueDate,
       invoiceFileUrl: upload.downloadUrl,
       storagePath: upload.storagePath,
-      invoiceStatus: 'Generated',
+      agentName: load.dispatcherName,
+      dedupeKey: '${load.companyId}_${load.loadNumber}',
+      invoiceStatus: 'Invoice Generated',
       paymentStatus: 'Unpaid',
       sentDate: '',
       paidDate: '',
@@ -106,9 +133,17 @@ class InvoiceService {
 
     await _realtime.saveInvoice(invoice);
     await _realtime.updateLoad(load.id, {
-      'invoiceStatus': 'Generated',
+      'invoiceStatus': 'Invoice Generated',
+      'financialStatus': 'Invoice Generated',
       'updatedDate': DateTime.now().toIso8601String(),
     });
+    await _realtime.addActivityLog(
+      loadId: load.id,
+      type: 'invoice_generated',
+      message: 'Invoice $invoiceNumber generated.',
+      actorId: '',
+      actorName: 'Accounting',
+    );
 
     return invoice;
   }

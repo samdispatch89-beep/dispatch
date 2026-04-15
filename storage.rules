@@ -5,36 +5,36 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function roleIs(expected) {
-      return signedIn() && request.auth.token.role == expected;
+    function role() {
+      return request.auth.token.role;
     }
 
     function isAdmin() {
-      return roleIs('admin');
+      return signedIn() && role() == 'admin';
     }
 
     function isAccountant() {
-      return roleIs('accountant');
+      return signedIn() && role() == 'accountant';
     }
 
     function isPaperwork() {
-      return roleIs('paperwork');
+      return signedIn() && role() == 'paperwork';
     }
 
     function isDispatcher() {
-      return roleIs('dispatcher');
+      return signedIn() && role() == 'dispatcher';
     }
 
-    match /loads/{loadId}/{docType}/{fileName} {
-      allow read: if isAdmin() || isAccountant() || isPaperwork() || isDispatcher();
+    match /companies/{companyName}/drivers/{driverName}/{yearWeek}/loads/{loadNumber}/{documentType}/{fileName} {
+      allow read: if signedIn();
       allow write: if isAdmin()
         || isPaperwork()
-        || (isAccountant() && (docType == 'invoice_copy' || docType == 'payment_support_document'))
-        || (isDispatcher() && docType == 'other');
+        || (isAccountant() && documentType == 'invoice')
+        || (isDispatcher() && (documentType == 'rate_confirmation' || documentType == 'other'));
     }
 
-    match /invoices/{year}/{fileName} {
-      allow read: if isAdmin() || isAccountant();
+    match /invoices/{companyName}/{yearWeek}/{fileName} {
+      allow read: if signedIn();
       allow write: if isAdmin() || isAccountant();
     }
   }
