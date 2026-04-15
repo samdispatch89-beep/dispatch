@@ -5,37 +5,49 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function role() {
-      return request.auth.token.role;
+    function roleIs(expected) {
+      return signedIn() && request.auth.token.role == expected;
     }
 
     function isAdmin() {
-      return signedIn() && role() == 'admin';
+      return roleIs('admin');
     }
 
     function isAccountant() {
-      return signedIn() && role() == 'accountant';
+      return roleIs('accountant');
     }
 
     function isPaperwork() {
-      return signedIn() && role() == 'paperwork';
+      return roleIs('paperwork');
     }
 
     function isDispatcher() {
-      return signedIn() && role() == 'dispatcher';
+      return roleIs('dispatcher');
     }
 
-    match /companies/{companyName}/drivers/{driverName}/{yearWeek}/loads/{loadNumber}/{documentType}/{fileName} {
+    match /loads/{loadId}/{docType}/{fileName} {
       allow read: if signedIn();
-      allow write: if isAdmin()
-        || isPaperwork()
-        || (isAccountant() && documentType == 'invoice')
-        || (isDispatcher() && (documentType == 'rate_confirmation' || documentType == 'other'));
+      allow write: if signedIn();
     }
 
-    match /invoices/{companyName}/{yearWeek}/{fileName} {
+    match /invoices/{year}/{fileName} {
       allow read: if signedIn();
-      allow write: if isAdmin() || isAccountant();
+      allow write: if signedIn();
     }
+  },
+  match /b/{bucket}/o {
+    // This is like saying, "For my special toy box..."
+
+    match /my-important-stuff/{fileId} {
+      // ...and inside a special section called 'my-important-stuff',
+      // for any toy (fileId) in there:
+
+      allow read, write: if request.auth != null;
+      // Allow people to read (look at) and write (put in/take out) toys,
+      // BUT ONLY IF they are logged in (request.auth is not empty)!
+    }
+
+    // For everything else in the toy box, no one can touch it unless we say so!
   }
 }
+
