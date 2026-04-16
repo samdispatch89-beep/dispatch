@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 class ErrorDialogService {
@@ -11,37 +9,27 @@ class ErrorDialogService {
     String title = 'Error',
   }) async {
     if (!context.mounted) return;
-
-    final navigator = Navigator.of(context, rootNavigator: true);
-    var closed = false;
-    late final Timer timer;
-
-    void closeDialog() {
-      if (closed || !navigator.mounted || !navigator.canPop()) return;
-      closed = true;
-      navigator.pop();
-    }
-
-    timer = Timer(const Duration(seconds: 10), closeDialog);
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: closeDialog,
-              child: const Text('Close'),
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(days: 1),
+        showCloseIcon: true,
+        dismissDirection: DismissDirection.none,
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
+            const SizedBox(height: 4),
+            Text(message),
           ],
-        );
-      },
-    ).whenComplete(() {
-      closed = true;
-      timer.cancel();
-    });
+        ),
+      ),
+    );
   }
 }

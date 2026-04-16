@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:pdf/widgets.dart' as pw;
+import '../services/realtime_service.dart';
 import '../services/error_dialog_service.dart';
 import '../services/storage_service.dart';
 
@@ -35,14 +36,23 @@ class _PdfScannerState extends State<PdfScanner> {
       }
       final bytes = await pdf.save();
       final filename = 'scan_${widget.loadId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
-      final upload = await storage.uploadBytes(
-        bytes,
-        'scans/${widget.loadId}/$filename',
+      final load = await RealtimeService.instance.getLoad(widget.loadId);
+      if (load == null) {
+        throw StateError('Load not found for scan upload.');
+      }
+      final upload = await storage.uploadDocumentBytes(
+        bytes: bytes,
+        companyName: load.companyName,
+        driverName: load.driverName,
+        yearWeek: load.yearWeek,
+        loadNumber: load.loadNumber,
+        documentType: 'other',
         fileName: filename,
+        mimeType: 'application/pdf',
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Uploaded: ${upload.downloadUrl}')),
+          SnackBar(content: Text('Uploaded: ${upload.fileName}')),
         );
       }
     } catch (error) {

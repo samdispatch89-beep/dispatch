@@ -2,6 +2,8 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const logger = require("firebase-functions/logger");
 const PDFDocument = require("pdfkit");
+const {S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand} = require("@aws-sdk/client-s3");
+const {getSignedUrl} = require("@aws-sdk/s3-request-presigner");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -9,7 +11,169 @@ const path = require("path");
 admin.initializeApp();
 
 const db = admin.database();
-const bucket = admin.storage().bucket();
+const VALID_DOCUMENT_TYPES = new Set([
+  "rate_confirmation",
+  "bol",
+  "pod",
+  "invoice",
+  "carrier_packet",
+  "invoice_copy",
+  "payment_support_document",
+  "other",
+]);
+
+function getR2Config() {
+  const config = functions.config().r2 || {};
+  const accountId = String(config.account_id || "").trim();
+  const accessKeyId = String(config.access_key || "").trim();
+  const secretAccessKey = String(config.secret_key || "").trim();
+  const bucketName = String(config.bucket || "").trim();
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "R2 config is incomplete. Required config keys: r2.account_id, r2.access_key, r2.secret_key, r2.bucket.",
+    );
+  }
+  return {
+    accountId,
+    accessKeyId,
+    secretAccessKey,
+    bucketName,
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+  };
+}
+
+function createR2Client() {
+  const config = getR2Config();
+  return new S3Client({
+    region: "auto",
+    endpoint: config.endpoint,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+  });
+}
+
+function buildR2ObjectPath({
+  companyName,
+  driverName,
+  yearWeek,
+  loadNumber,
+  documentType,
+  fileName,
+}) {
+  return [
+    "companies",
+    normalizeStorageSegment(companyName, "company"),
+    "drivers",
+    normalizeStorageSegment(driverName, "driver"),
+    normalizeStorageSegment(yearWeek, "week"),
+    "loads",
+    normalizeStorageSegment(loadNumber, "load"),
+    normalizeStorageSegment(documentType, "document"),
+    normalizeStorageSegment(fileName, "file"),
+  ].join("/");
+}
+
+function buildInvoiceStoragePath(companyName, yearWeek) {
+  return [
+    "invoices",
+    normalizeStorageSegment(companyName, "company"),
+    normalizeStorageSegment(yearWeek, "week"),
+    `invoice_${Date.now()}.pdf`,
+  ].join("/");
+}
+
+function toHttpsStorageError(error, fallbackMessage) {
+  if (error instanceof functions.https.HttpsError) {
+    return error;
+  }
+  const rawMessage = String(error?.message || error || fallbackMessage);
+  logger.error(fallbackMessage, {
+    error: rawMessage,
+    stack: error?.stack || null,
+  });
+  return new functions.https.HttpsError("internal", "Upload failed", {
+    message: rawMessage,
+  });
+}
+
+function validateUploadPayload(data) {
+  const companyName = String(data.companyName || "").trim();
+  const driverName = String(data.driverName || "").trim();
+  const yearWeek = String(data.yearWeek || "").trim();
+  const loadNumber = String(data.loadNumber || "").trim();
+  const documentType = String(data.documentType || "").trim().toLowerCase();
+  const fileName = String(data.fileName || "").trim();
+  const mimeType = String(data.mimeType || "").trim();
+  if (!companyName || !driverName || !yearWeek || !loadNumber || !documentType || !fileName || !mimeType) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "companyName, driverName, yearWeek, loadNumber, documentType, fileName, and mimeType are required.",
+    );
+  }
+  if (!VALID_DOCUMENT_TYPES.has(documentType)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        `Invalid documentType: ${documentType}`,
+    );
+  }
+  return {
+    companyName,
+    driverName,
+    yearWeek,
+    loadNumber,
+    documentType,
+    fileName,
+    mimeType,
+  };
+}
+
+async function createR2DownloadUrl(storagePath, {
+  inline = true,
+  fileName = "",
+  expiresIn = 15 * 60,
+} = {}) {
+  const client = createR2Client();
+  const config = getR2Config();
+  const responseDisposition = inline ?
+    "inline" :
+    `attachment${fileName ? `; filename="${fileName.replace(/"/g, "")}"` : ""}`;
+  return getSignedUrl(client, new GetObjectCommand({
+    Bucket: config.bucketName,
+    Key: storagePath,
+    ResponseContentDisposition: responseDisposition,
+  }), {expiresIn});
+}
+
+async function createR2UploadUrl(storagePath, {
+  contentType = "application/octet-stream",
+  expiresIn = 15 * 60,
+} = {}) {
+  const client = createR2Client();
+  const config = getR2Config();
+  return getSignedUrl(client, new PutObjectCommand({
+    Bucket: config.bucketName,
+    Key: storagePath,
+    ContentType: contentType,
+  }), {expiresIn});
+}
+
+async function storeBufferInR2({
+  storagePath,
+  body,
+  contentType,
+}) {
+  const client = createR2Client();
+  const config = getR2Config();
+  await client.send(new PutObjectCommand({
+    Bucket: config.bucketName,
+    Key: storagePath,
+    Body: body,
+    ContentType: contentType,
+  }));
+}
 
 function buildInvoiceNumber(invoices) {
   let max = 1000;
@@ -331,6 +495,29 @@ async function generateCompanyInvoicePdf({
   return {tmpPath, fileName};
 }
 
+async function uploadGeneratedInvoicePdf({
+  companyName,
+  yearWeek,
+  pdf,
+}) {
+  const storagePath = buildInvoiceStoragePath(companyName, yearWeek);
+  const fileBuffer = await fs.promises.readFile(pdf.tmpPath);
+  await storeBufferInR2({
+    storagePath,
+    body: fileBuffer,
+    contentType: "application/pdf",
+  });
+  await fs.promises.unlink(pdf.tmpPath).catch(() => null);
+  const downloadUrl = await createR2DownloadUrl(storagePath, {
+    inline: true,
+    fileName: path.basename(storagePath),
+  });
+  return {
+    storagePath,
+    downloadUrl,
+  };
+}
+
 function loadMatchesRange(load, companyId, startDate, endDate, selectedDriverIds) {
   if (String(load.companyId || "") !== companyId) return false;
   const loadDate = parseDateValue(load.date);
@@ -415,10 +602,18 @@ async function createCompanyInvoiceInternal({
   const existing = Object.entries(invoices).find(([, invoice]) => invoice.dedupeKey === dedupeKey);
   if (existing) {
     const [invoiceId, invoice] = existing;
+    const storagePath = String(invoice.storagePath || "");
+    const downloadUrl = storagePath ?
+      await createR2DownloadUrl(storagePath, {
+        inline: true,
+        fileName: path.basename(storagePath),
+      }) :
+      String(invoice.invoiceFileUrl || "");
     return {
       invoiceId,
       invoiceNumber: invoice.invoiceNumber,
-      invoiceFileUrl: invoice.invoiceFileUrl || "",
+      invoiceFileUrl: downloadUrl,
+      storagePath,
       existing: true,
     };
   }
@@ -453,22 +648,10 @@ async function createCompanyInvoiceInternal({
     rows,
     summary: totals,
   });
-
-  const storagePath = [
-    "invoices",
-    normalizeStorageSegment(company.name, companyId),
+  const upload = await uploadGeneratedInvoicePdf({
+    companyName: company.name || companyId,
     yearWeek,
-    `invoice_${Date.now()}.pdf`,
-  ].join("/");
-
-  await bucket.upload(pdf.tmpPath, {
-    destination: storagePath,
-    metadata: {contentType: "application/pdf"},
-  });
-
-  const [downloadUrl] = await bucket.file(storagePath).getSignedUrl({
-    action: "read",
-    expires: "2100-01-01",
+    pdf,
   });
 
   const invoiceRecord = {
@@ -493,8 +676,8 @@ async function createCompanyInvoiceInternal({
     dispatchFeeAmount: totals.totalDispatchFee,
     invoiceAmount: totals.totalDispatchFee,
     dueDate,
-    invoiceFileUrl: downloadUrl,
-    storagePath,
+    invoiceFileUrl: "",
+    storagePath: upload.storagePath,
     agentName,
     dedupeKey,
     status: "Generated",
@@ -532,14 +715,230 @@ async function createCompanyInvoiceInternal({
   return {
     invoiceId,
     invoiceNumber,
-    invoiceFileUrl: downloadUrl,
-    storagePath,
+    invoiceFileUrl: upload.downloadUrl,
+    storagePath: upload.storagePath,
     totalLoads: totals.totalLoads,
     totalAmount: totals.totalDispatchFee,
     totalGross: totals.totalGross,
     existing: false,
   };
 }
+
+exports.generateR2UploadUrl = functions.https.onCall(async (data, context) => {
+  try {
+    logger.info("generateR2UploadUrl entry", {
+      authenticated: Boolean(context.auth),
+    });
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const requester = (await db.ref(`users/${context.auth.uid}`).get()).val();
+    if (!requester?.role) {
+      throw new functions.https.HttpsError("permission-denied", "User role is required.");
+    }
+
+    const payload = validateUploadPayload(data);
+    const config = getR2Config();
+    const storagePath = buildR2ObjectPath(payload);
+    logger.info("generateR2UploadUrl validated", {
+      accountId: config.accountId,
+      endpoint: config.endpoint,
+      bucket: config.bucketName,
+      storagePath,
+      mimeType: payload.mimeType,
+      documentType: payload.documentType,
+      role: requester.role,
+    });
+
+    const uploadUrl = await createR2UploadUrl(storagePath, {
+      contentType: payload.mimeType,
+    });
+    const downloadUrl = await createR2DownloadUrl(storagePath, {
+      inline: true,
+      fileName: payload.fileName,
+    });
+    logger.info("generateR2UploadUrl success", {
+      storagePath,
+      mimeType: payload.mimeType,
+    });
+    return {
+      uploadUrl,
+      downloadUrl,
+      storagePath,
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      headers: {
+        "Content-Type": payload.mimeType,
+      },
+    };
+  } catch (error) {
+    throw toHttpsStorageError(error, "Unable to connect to Cloudflare R2 for upload URL generation.");
+  }
+});
+
+exports.generateR2DownloadUrl = functions.https.onCall(async (data, context) => {
+  try {
+    logger.info("generateR2DownloadUrl entry", {
+      authenticated: Boolean(context.auth),
+    });
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const requester = (await db.ref(`users/${context.auth.uid}`).get()).val();
+    if (!requester?.role) {
+      throw new functions.https.HttpsError("permission-denied", "User role is required.");
+    }
+
+    const storagePath = String(data.storagePath || "").trim();
+    const inline = data.inline !== false;
+    const fileName = String(data.fileName || path.basename(storagePath) || "document");
+    if (!storagePath) {
+      throw new functions.https.HttpsError("invalid-argument", "storagePath is required.");
+    }
+    const config = getR2Config();
+    logger.info("generateR2DownloadUrl validated", {
+      accountId: config.accountId,
+      endpoint: config.endpoint,
+      bucket: config.bucketName,
+      storagePath,
+      inline,
+    });
+
+    const downloadUrl = await createR2DownloadUrl(storagePath, {
+      inline,
+      fileName,
+    });
+    return {
+      downloadUrl,
+      storagePath,
+    };
+  } catch (error) {
+    throw toHttpsStorageError(error, "Unable to connect to Cloudflare R2 for download URL generation.");
+  }
+});
+
+exports.deleteR2Object = functions.https.onCall(async (data, context) => {
+  try {
+    logger.info("deleteR2Object entry", {
+      authenticated: Boolean(context.auth),
+    });
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const requester = (await db.ref(`users/${context.auth.uid}`).get()).val();
+    const role = requester?.role;
+    if (!["admin", "accountant", "paperwork"].includes(role)) {
+      throw new functions.https.HttpsError("permission-denied", "You cannot delete stored documents.");
+    }
+
+    const storagePath = String(data.storagePath || "").trim();
+    if (!storagePath) {
+      throw new functions.https.HttpsError("invalid-argument", "storagePath is required.");
+    }
+
+    const client = createR2Client();
+    const config = getR2Config();
+    logger.info("deleteR2Object validated", {
+      accountId: config.accountId,
+      endpoint: config.endpoint,
+      bucket: config.bucketName,
+      storagePath,
+    });
+    await client.send(new DeleteObjectCommand({
+      Bucket: config.bucketName,
+      Key: storagePath,
+    }));
+
+    return {success: true, storagePath};
+  } catch (error) {
+    throw toHttpsStorageError(error, "Unable to delete the Cloudflare R2 object.");
+  }
+});
+
+// TEMPORARY DEBUG ONLY: remove after verifying R2 config and credentials.
+exports.r2DebugSelfTest = functions.https.onCall(async (data, context) => {
+  try {
+    logger.info("r2DebugSelfTest entry", {
+      authenticated: Boolean(context.auth),
+    });
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const requester = (await db.ref(`users/${context.auth.uid}`).get()).val();
+    if (requester?.role !== "admin") {
+      throw new functions.https.HttpsError("permission-denied", "Only admin can run the R2 debug self-test.");
+    }
+    if (String((functions.config().r2 || {}).debug_enabled || "false") !== "true") {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Temporary R2 debug self-test is disabled. Enable r2.debug_enabled=true only while diagnosing upload issues.",
+      );
+    }
+    const config = getR2Config();
+    const storagePath = "test/hello.txt";
+    const body = Buffer.from("hello from dispatch r2 debug");
+    logger.info("r2DebugSelfTest validated", {
+      accountId: config.accountId,
+      endpoint: config.endpoint,
+      bucket: config.bucketName,
+      storagePath,
+      mimeType: "text/plain",
+    });
+    await storeBufferInR2({
+      storagePath,
+      body,
+      contentType: "text/plain",
+    });
+    logger.info("r2DebugSelfTest success", {storagePath});
+    return {
+      success: true,
+      storagePath,
+      bucket: config.bucketName,
+      endpoint: config.endpoint,
+    };
+  } catch (error) {
+    throw toHttpsStorageError(error, "R2 debug self-test failed.");
+  }
+});
+
+exports.generateInvoicePdfAndStore = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+  }
+
+  const requester = (await db.ref(`users/${context.auth.uid}`).get()).val();
+  const role = requester?.role;
+  if (role !== "admin" && role !== "accountant") {
+    throw new functions.https.HttpsError("permission-denied", "Only accountant or admin can generate invoices.");
+  }
+
+  const companyId = String(data.companyId || "");
+  const startDateRaw = String(data.startDate || "");
+  const endDateRaw = String(data.endDate || "");
+  const agentName = String(data.agentName || requester?.name || "Agent");
+  const explicitLoadIds = Array.isArray(data.explicitLoadIds) ?
+    data.explicitLoadIds.map((item) => String(item)) : [];
+  const driverIds = Array.isArray(data.driverIds) ?
+    data.driverIds.map((item) => String(item)).filter((item) => item.length > 0) : [];
+
+  if (!companyId || !startDateRaw || !endDateRaw) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "companyId, startDate, and endDate are required.",
+    );
+  }
+
+  return createCompanyInvoiceInternal({
+    requesterName: requester?.name || "Accounting",
+    actorUid: context.auth.uid,
+    companyId,
+    startDateRaw,
+    endDateRaw,
+    agentName,
+    driverIds,
+    explicitLoadIds,
+  });
+});
 
 exports.syncUserClaims = functions.database.ref("/users/{uid}").onWrite(async (change, context) => {
   const uid = context.params.uid;

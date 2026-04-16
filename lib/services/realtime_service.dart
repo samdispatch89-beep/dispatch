@@ -36,6 +36,9 @@ class RealtimeService {
   DatabaseReference get notificationsRef => _root.child('notifications');
   DatabaseReference get weeklySummariesRef => _root.child('weekly_summaries');
 
+  DatabaseReference loadDocumentsRef(String loadId) =>
+      loadsRef.child(loadId).child('documents');
+
   Map<String, dynamic> _asMap(Object? value) {
     if (value is Map) {
       return value.map((key, val) => MapEntry(key.toString(), val));
@@ -298,8 +301,14 @@ class RealtimeService {
   }
 
   Stream<List<DocumentRecord>> streamDocumentsForLoad(String loadId) {
-    return documentsRef.onValue.map((event) {
-      final docs = _listFromSnapshot(event.snapshot, DocumentRecord.fromMap);
+    return loadDocumentsRef(loadId).onValue.asyncMap((event) async {
+      final nestedDocs = _listFromSnapshot(event.snapshot, DocumentRecord.fromMap)
+        ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+      if (nestedDocs.isNotEmpty) {
+        return nestedDocs;
+      }
+      final snapshot = await documentsRef.get();
+      final docs = _listFromSnapshot(snapshot, DocumentRecord.fromMap);
       return docs.where((doc) => doc.loadId == loadId).toList()
         ..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
     });
@@ -314,7 +323,11 @@ class RealtimeService {
   }
 
   Future<void> saveDocument(DocumentRecord document) async {
-    await documentsRef.child(document.id).set(document.toMap());
+    final payload = document.toMap();
+    await _root.update({
+      'documents/${document.id}': payload,
+      'loads/${document.loadId}/documents/${document.id}': payload,
+    });
     await refreshPaperworkStatus(document.loadId, changedDocument: document);
   }
 
@@ -322,7 +335,14 @@ class RealtimeService {
     String documentId,
     Map<String, dynamic> updates,
   ) async {
-    await documentsRef.child(documentId).update(updates);
+    final snapshot = await documentsRef.child(documentId).get();
+    final map = _asMap(snapshot.value);
+    if (map.isEmpty) return;
+    final document = DocumentRecord.fromMap(documentId, map);
+    await _root.update({
+      'documents/$documentId': {...map, ...updates},
+      'loads/${document.loadId}/documents/$documentId': {...map, ...updates},
+    });
   }
 
   Future<void> deleteDocument(String documentId) async {
@@ -330,7 +350,10 @@ class RealtimeService {
     final map = _asMap(snapshot.value);
     if (map.isEmpty) return;
     final document = DocumentRecord.fromMap(documentId, map);
-    await documentsRef.child(documentId).remove();
+    await _root.update({
+      'documents/$documentId': null,
+      'loads/${document.loadId}/documents/$documentId': null,
+    });
     await refreshPaperworkStatus(document.loadId);
     await addActivityLog(
       loadId: document.loadId,
@@ -349,7 +372,11 @@ class RealtimeService {
     final map = _asMap(snapshot.value);
     if (map.isEmpty) return;
     final document = DocumentRecord.fromMap(documentId, map);
-    await documentsRef.child(documentId).update({'verified': verified});
+    final updates = {'verified': verified};
+    await _root.update({
+      'documents/$documentId': {...map, ...updates},
+      'loads/${document.loadId}/documents/$documentId': {...map, ...updates},
+    });
     await addActivityLog(
       loadId: document.loadId,
       type: 'document_verified',

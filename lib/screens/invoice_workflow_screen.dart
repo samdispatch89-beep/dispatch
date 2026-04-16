@@ -8,6 +8,7 @@ import '../models/invoice_record.dart';
 import '../models/load_item.dart';
 import '../responsive/breakpoints.dart';
 import '../services/automation_service.dart';
+import '../services/storage_service.dart';
 import '../shared/widgets/responsive_grid.dart';
 import '../shared/widgets/responsive_page_container.dart';
 import '../theme/app_colors.dart';
@@ -38,6 +39,7 @@ class InvoiceWorkflowScreen extends StatefulWidget {
 
 class _InvoiceWorkflowScreenState extends State<InvoiceWorkflowScreen> {
   final AutomationService _automation = AutomationService();
+  final StorageService _storage = StorageService();
 
   Company? _company;
   DateTimeRange? _dateRange;
@@ -305,17 +307,20 @@ class _InvoiceWorkflowScreenState extends State<InvoiceWorkflowScreen> {
               result: _generationResult ?? const {},
               invoice: _resultInvoice,
               onViewPdf: () async {
-                final url =
-                    (_resultInvoice?.invoiceFileUrl ??
-                            _generationResult?['invoiceFileUrl']?.toString() ??
+                final storagePath =
+                    (_resultInvoice?.storagePath ??
+                            _generationResult?['storagePath']?.toString() ??
                             '')
                         .trim();
-                if (url.isEmpty) {
+                if (storagePath.isEmpty) {
                   widget.onMessage(
-                    'No PDF URL is available for this invoice yet.',
+                    'No PDF is available for this invoice yet.',
                   );
                   return;
                 }
+                final url = await _storage.getDownloadUrl(
+                  storagePath: storagePath,
+                );
                 final uri = Uri.tryParse(url);
                 if (uri == null ||
                     !await launchUrl(
@@ -326,15 +331,19 @@ class _InvoiceWorkflowScreenState extends State<InvoiceWorkflowScreen> {
                 }
               },
               onDownloadPdf: () async {
-                final url =
-                    (_resultInvoice?.invoiceFileUrl ??
-                            _generationResult?['invoiceFileUrl']?.toString() ??
+                final storagePath =
+                    (_resultInvoice?.storagePath ??
+                            _generationResult?['storagePath']?.toString() ??
                             '')
                         .trim();
-                if (url.isEmpty) {
+                if (storagePath.isEmpty) {
                   widget.onMessage('No invoice PDF is available to download.');
                   return;
                 }
+                final url = await _storage.getDownloadUrl(
+                  storagePath: storagePath,
+                  inline: false,
+                );
                 final uri = Uri.tryParse(url);
                 if (uri == null ||
                     !await launchUrl(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // ignore_for_file: unused_element, unused_element_parameter
 
 import 'package:file_picker/file_picker.dart';
@@ -516,12 +518,15 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Future<void> _downloadInvoicePdf(InvoiceRecord invoice) async {
-    final url = invoice.invoiceFileUrl.trim();
-    if (url.isEmpty) {
-      _showMessage('No PDF is available for invoice ${invoice.invoiceNumber}.');
+    final storagePath = invoice.storagePath.trim();
+    if (storagePath.isEmpty) {
+      _showMessage(
+        'No PDF storage path is available for invoice ${invoice.invoiceNumber}.',
+      );
       return;
     }
 
+    final url = await _storageService.getDownloadUrl(storagePath: storagePath);
     final uri = Uri.tryParse(url);
     if (uri == null ||
         !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -2641,6 +2646,8 @@ class _LoadDetailSheet extends StatelessWidget {
     BuildContext context, {
     required String documentType,
   }) async {
+    final progress = ValueNotifier<double?>(0);
+    BuildContext? dialogContext;
     try {
       final result = await FilePicker.pickFiles(
         withData: true,
@@ -2654,23 +2661,65 @@ class _LoadDetailSheet extends StatelessWidget {
         onUpdated('Unable to read the selected file. Please try again.');
         return;
       }
+      if (!context.mounted) return;
 
       final folderName = documentType.toLowerCase().replaceAll(' ', '_');
-      final storagePath = storageService.buildLoadDocumentPath(
+      if (load.companyName.trim().isEmpty ||
+          load.driverName.trim().isEmpty ||
+          load.yearWeek.trim().isEmpty ||
+          load.loadNumber.trim().isEmpty) {
+        onUpdated('Missing required load info before upload.');
+        return;
+      }
+
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (progressContext) {
+            dialogContext = progressContext;
+            return AlertDialog(
+              title: const Text('Uploading document'),
+              content: ValueListenableBuilder<double?>(
+                valueListenable: progress,
+                builder: (context, value, _) {
+                  final progressValue = value ?? 0;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(file.name),
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(value: progressValue),
+                      const SizedBox(height: 8),
+                      Text('${(progressValue * 100).toStringAsFixed(0)}%'),
+                    ],
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      );
+
+      final upload = await storageService.uploadDocumentBytes(
+        bytes: file.bytes!,
         companyName: load.companyName,
         driverName: load.driverName,
         yearWeek: load.yearWeek,
         loadNumber: load.loadNumber,
         documentType: folderName,
         fileName: file.name,
+        mimeType: storageService.resolveMimeType(file.name),
+        onProgress: (value) => progress.value = value,
       );
-
-      final upload = await storageService.uploadBytes(
-        file.bytes!,
-        storagePath,
-        fileName: file.name,
-      );
-      final documentId = RealtimeService.instance.documentsRef.push().key!;
+      if (dialogContext != null && dialogContext!.mounted) {
+        Navigator.of(dialogContext!, rootNavigator: true).pop();
+      }
+      final documentId = RealtimeService.instance
+          .loadDocumentsRef(load.id)
+          .push()
+          .key!;
       final document = DocumentRecord(
         id: documentId,
         loadId: load.id,
@@ -2685,7 +2734,7 @@ class _LoadDetailSheet extends StatelessWidget {
         documentType: folderName,
         fileName: upload.fileName,
         storagePath: upload.storagePath,
-        downloadUrl: upload.downloadUrl,
+        downloadUrl: '',
         uploadedBy: user.uid,
         uploadedAt: DateTime.now().toIso8601String(),
         verified: false,
@@ -2697,10 +2746,62 @@ class _LoadDetailSheet extends StatelessWidget {
       );
       await RealtimeService.instance.saveDocument(document);
       onUpdated('$documentType uploaded for ${load.loadNumber}');
-      if (context.mounted) Navigator.of(context).pop();
     } catch (error) {
+      if (dialogContext != null && dialogContext!.mounted) {
+        Navigator.of(dialogContext!, rootNavigator: true).pop();
+      }
       onUpdated('Document upload failed: $error');
+    } finally {
+      progress.dispose();
     }
+  }
+
+  Widget _buildUploadActions(
+    BuildContext context, {
+    required List<String> documentTypes,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = width >= 1100 ? 3 : width >= 680 ? 2 : 1;
+        final spacing = 12.0;
+        final itemWidth =
+            columns == 1
+                ? width
+                : (width - (spacing * (columns - 1))) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children:
+              documentTypes.map((type) {
+                final label = 'Upload $type';
+                return SizedBox(
+                  width: itemWidth,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _uploadDocument(context, documentType: type),
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      alignment: Alignment.centerLeft,
+                    ),
+                  ),
+                );
+              }).toList(),
+        );
+      },
+    );
   }
 
   @override
@@ -2814,34 +2915,16 @@ class _LoadDetailSheet extends StatelessWidget {
               if (_canManageDocs || _canManageAccountingDocs)
                 const SizedBox(height: 12),
               if (_canManageDocs)
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: paperworkDocTypes
-                      .map(
-                        (type) => OutlinedButton(
-                          onPressed: () =>
-                              _uploadDocument(context, documentType: type),
-                          child: Text('Upload $type'),
-                        ),
-                      )
-                      .toList(),
+                _buildUploadActions(
+                  context,
+                  documentTypes: paperworkDocTypes,
                 ),
               if (_canManageAccountingDocs)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: accountingDocTypes
-                        .map(
-                          (type) => OutlinedButton(
-                            onPressed: () =>
-                                _uploadDocument(context, documentType: type),
-                            child: Text('Upload $type'),
-                          ),
-                        )
-                        .toList(),
+                  child: _buildUploadActions(
+                    context,
+                    documentTypes: accountingDocTypes,
                   ),
                 ),
               const SizedBox(height: 20),
@@ -3428,7 +3511,10 @@ class _DocumentsPage extends StatelessWidget {
                 trailing: PopupMenuButton<String>(
                   onSelected: (value) async {
                     if (value == 'open') {
-                      final uri = Uri.tryParse(document.downloadUrl);
+                      final url = await StorageService().getDownloadUrl(
+                        storagePath: document.storagePath,
+                      );
+                      final uri = Uri.tryParse(url);
                       if (uri == null ||
                           !await launchUrl(
                             uri,
