@@ -1,7 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_registration.dart';
 import '../responsive/breakpoints.dart';
 import '../services/error_dialog_service.dart';
 import '../shared/widgets/responsive_page_container.dart';
@@ -223,17 +222,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                     : const Text('Sign in'),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const AdminRegistration(),
-                                ),
-                              );
-                            },
-                            child: const Text('Bootstrap first admin'),
                           ),
                         ],
                       ),
